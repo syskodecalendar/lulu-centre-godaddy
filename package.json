@@ -1,0 +1,27 @@
+{
+  "name": "lulu-centre-managed-site",
+  "version": "2.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "setup-admin": "node --env-file-if-exists=.env scripts/setup-admin.js",
+    "test": "node --test tests/*.test.js",
+    "build": "node --check server.js && node --check backend/storage.js",
+    "import-content": "node --env-file-if-exists=.env scripts/import-content.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "express": "^5.1.0",
+    "multer": "^2.1.1",
+    "mysql2": "^3.24.5",
+    "nodemailer": "^10.0.13"
+  },
+  "devDependencies": {
+    "smtp-server": "^3.16.1"
+  },
+  "main": "server.js"
+}
