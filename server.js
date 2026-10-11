@@ -10,6 +10,22 @@ import {makeCatalog, defaults, validateContent, renderContent, renderCSS} from '
 import {openStorage} from './backend/storage.js';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
+// The public domain is not a secret. Keep a fixed trusted production default
+// so a missing or malformed hosting variable cannot take this website offline.
+export function resolveAppOrigin(value, production) {
+  const fallback = 'https://lulucentre.com';
+  let candidate = String(value || '').trim().replace(/^APP_ORIGIN\s*=\s*/i,'');
+  if ((candidate.startsWith('"') && candidate.endsWith('"')) ||
+      (candidate.startsWith("'") && candidate.endsWith("'"))) candidate = candidate.slice(1,-1).trim();
+  if (!candidate) return {origin:production ? fallback : '', fallback:production};
+  try {
+    const url = new URL(candidate);
+    if (!['https:', ...(production ? [] : ['http:'])].includes(url.protocol) || url.username || url.password) throw new Error('Invalid origin');
+    return {origin:url.origin, fallback:false};
+  } catch {
+    return {origin:production ? fallback : '', fallback:production};
+  }
+}
 export async function passwordHash(password) {
   const salt = randomBytes(16).toString('hex');
   return `${salt}:${(await derive(password,salt,64)).toString('hex')}`;
@@ -22,6 +38,11 @@ async function checkPassword(password, hash) {
 }
 export async function createApp(options = {}) {
   const env = {...process.env,...options.env};
+  const production = env.NODE_ENV === 'production';
+  const originConfig = resolveAppOrigin(env.APP_ORIGIN,production);
+  env.APP_ORIGIN = originConfig.origin;
+  if (production && originConfig.fallback) console.warn('[Lulu Centre] APP_ORIGIN missing or invalid; using the confirmed domain https://lulucentre.com.');
+  if (production) console.info(`[Lulu Centre] Allowed request origin: ${env.APP_ORIGIN}`);
   const dataDir = path.resolve(options.dataDir || env.DATA_DIR || path.join(root,'data'));
   mkdirSync(dataDir,{recursive:true,mode:0o700});
   const catalog = makeCatalog(root);
@@ -39,8 +60,6 @@ export async function createApp(options = {}) {
   const app = express();
   app.disable('x-powered-by');
   if (env.TRUST_PROXY === '1') app.set('trust proxy',1);
-  const production = env.NODE_ENV === 'production';
-  if (production && !env.APP_ORIGIN?.startsWith('https://')) throw new Error('Set APP_ORIGIN to the HTTPS public origin in production.');
   const sessions = new Map();
   const attempts = new Map();
   const rate = (kind,max,windowMs) => (req,res,next) => {
@@ -167,7 +186,7 @@ export async function createApp(options = {}) {
   });
   app.get(['/', '/index.html'],async(req,res)=>res.type('html').set('Cache-Control','no-cache').send(renderContent(catalog,await getContent())));
   app.get('/styles.css',async(req,res)=>res.type('css').set('Cache-Control','no-cache').send(renderCSS(catalog,await getContent())));
-  app.get('/health',async(req,res)=>{try{await db.health();res.json({ok:true,storage:db.driver});}catch{res.status(503).json({ok:false});}});
+  app.get('/health',async(req,res)=>{try{await db.health();res.json({ok:true,storage:db.driver,origin:env.APP_ORIGIN});}catch{res.status(503).json({ok:false});}});
   app.use('/admin',express.static(path.join(root,'admin')));
   app.use('/assets',express.static(path.join(root,'assets'),{dotfiles:'deny',maxAge:'1d'}));
   app.use('/uploads',express.static(uploadsDir,{dotfiles:'deny',maxAge:'1y',immutable:true}));
